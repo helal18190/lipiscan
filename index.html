@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LipiScan</title>
+<style>
+:root{--bg:#eef2f7;--card:#fff;--ink:#0b2545;--ac:#0f8b8d;--mut:#5b6b82;--line:#d3dce8}
+@media(prefers-color-scheme:dark){:root{--bg:#0a1424;--card:#13213a;--ink:#e6edf7;--ac:#35c4c6;--mut:#93a4bd;--line:#26385a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,"Noto Sans Bengali","Noto Naskh Arabic",sans-serif}
+header{display:flex;justify-content:space-between;align-items:center;max-width:640px;margin:auto;padding:14px 14px 6px}
+.logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:20px}
+.logo svg{width:34px;height:34px}
+main{max-width:640px;margin:auto;padding:0 14px 48px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin:12px 0}
+button,label.btn{font:inherit;background:var(--ac);color:#fff;border:0;border-radius:10px;padding:12px 16px;margin:4px 6px 4px 0;display:inline-block;cursor:pointer}
+button:focus-visible,label.btn:focus-within{outline:3px solid var(--ink);outline-offset:2px}
+button.s{background:transparent;color:var(--ac);border:1.5px solid var(--ac)}
+button:disabled{opacity:.5}
+select{font:inherit;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);margin:4px 0}
+#stage{width:100%}
+canvas{display:block;max-width:100%;touch-action:none}
+.hint{color:var(--mut);font-size:14px;margin:0 0 8px}
+#pages{display:flex;flex-wrap:wrap;gap:10px}
+.pg{position:relative}
+.pg canvas{border:1px solid var(--line);width:96px;height:auto}
+.pg button{position:absolute;top:-6px;right:-6px;width:26px;height:26px;padding:0;border-radius:50%;background:var(--ink);color:var(--bg);margin:0}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">
+    <svg viewBox="0 0 48 48" aria-hidden="true"><rect x="4" y="4" width="40" height="40" rx="9" fill="#0b2545"/><path d="M12 19v-7h7M36 19v-7h-7M12 29v7h7M36 29v7h-7" fill="none" stroke="#35c4c6" stroke-width="3" stroke-linecap="round"/><path d="M17 31c3-9 6-13 10-13s2 6 5 5" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/></svg>
+    <span data-i="title">লিপিস্ক্যান</span>
+  </div>
+  <select id="lang" aria-label="Language"><option value="bn">বাংলা</option><option value="en">English</option></select>
+</header>
+<main>
+  <div class="card">
+    <p class="hint" data-i="intro"></p>
+    <label class="btn"><span data-i="pick"></span><input id="file" type="file" accept="image/*" hidden></label>
+  </div>
+
+  <div class="card" id="edit" hidden>
+    <p class="hint" data-i="drag"></p>
+    <div id="stage"><canvas id="cv"></canvas></div>
+    <div>
+      <select id="mode" aria-label="Filter">
+        <option value="enh" data-i="m_enh"></option>
+        <option value="bw" data-i="m_bw"></option>
+        <option value="gray" data-i="m_gray"></option>
+        <option value="orig" data-i="m_orig"></option>
+      </select>
+    </div>
+    <button id="go" data-i="go"></button>
+  </div>
+
+  <div class="card" id="out" hidden>
+    <div id="pages"></div>
+    <p>
+      <button id="pdf" data-i="pdf"></button>
+      <button id="png" class="s" data-i="png"></button>
+    </p>
+    <p class="hint" data-i="more"></p>
+  </div>
+</main>
+
+<script>
+const S={
+ bn:{title:"লিপিস্ক্যান",intro:"হাতের লেখা কাগজের ছবি তুলুন। কাগজ সোজা ও পরিষ্কার হয়ে প্রিন্টের উপযোগী PDF বা ছবি হবে।",pick:"ছবি তুলুন বা বাছাই করুন",drag:"চারটি কোণা টেনে কাগজের কিনারায় বসান।",m_enh:"রঙিন পরিষ্কার",m_bw:"সাদা-কালো",m_gray:"গ্রে",m_orig:"মূল রং",go:"পেজ যোগ করুন",pdf:"PDF ডাউনলোড",png:"শেষ পেজ PNG ডাউনলোড",more:"আরও পেজ যোগ করতে উপরে আবার ছবি বাছাই করুন।"},
+ en:{title:"LipiScan",intro:"Take a photo of your handwritten page. It is straightened and cleaned into a print-ready PDF or image.",pick:"Take or choose a photo",drag:"Drag the four corners to the edges of the paper.",m_enh:"Clean color",m_bw:"Black and white",m_gray:"Grayscale",m_orig:"Original color",go:"Add page",pdf:"Download PDF",png:"Download last page as PNG",more:"To add more pages, choose another photo above."}
+};
+const $=id=>document.getElementById(id);
+function setL(l){document.documentElement.lang=l;document.querySelectorAll('[data-i]').forEach(e=>e.textContent=S[l][e.dataset.i]);document.title=S[l].title}
+$('lang').onchange=e=>setL(e.target.value);setL('bn');
+
+let src,pts,drag=-1,pages=[];
+$('file').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;
+  const bm=await createImageBitmap(f,{imageOrientation:'from-image'});
+  const k=Math.min(1,2600/Math.max(bm.width,bm.height));
+  src=document.createElement('canvas');src.width=Math.round(bm.width*k);src.height=Math.round(bm.height*k);
+  src.getContext('2d').drawImage(bm,0,0,src.width,src.height);
+  const w=src.width,h=src.height;
+  pts=[[.06*w,.06*h],[.94*w,.06*h],[.94*w,.94*h],[.06*w,.94*h]];
+  $('edit').hidden=false;draw();e.target.value='';
+  $('edit').scrollIntoView({behavior:'smooth'});
+};
+function draw(){
+  const cv=$('cv'),vw=Math.min($('stage').clientWidth,src.width),s=vw/src.width;
+  cv.width=vw;cv.height=Math.round(src.height*s);
+  const c=cv.getContext('2d');c.drawImage(src,0,0,cv.width,cv.height);
+  c.lineWidth=2;c.strokeStyle='#0f8b8d';c.fillStyle='rgba(15,139,141,.2)';
+  c.beginPath();pts.forEach((p,i)=>c[i?'lineTo':'moveTo'](p[0]*s,p[1]*s));c.closePath();c.fill();c.stroke();
+  pts.forEach(p=>{c.beginPath();c.arc(p[0]*s,p[1]*s,14,0,7);c.fillStyle='#fff';c.fill();c.stroke()});
+}
+function pos(e){const r=$('cv').getBoundingClientRect(),k=src.width/r.width;return[(e.clientX-r.left)*k,(e.clientY-r.top)*k]}
+$('cv').onpointerdown=e=>{
+  const q=pos(e),k=$('cv').getBoundingClientRect().width/src.width;let b=-1,bd=1e9;
+  pts.forEach((p,i)=>{const d=Math.hypot(p[0]-q[0],p[1]-q[1]);if(d<bd){bd=d;b=i}});
+  if(bd*k<60){drag=b;$('cv').setPointerCapture(e.pointerId)}
+};
+$('cv').onpointermove=e=>{if(drag<0)return;const q=pos(e);pts[drag]=[Math.max(0,Math.min(src.width,q[0])),Math.max(0,Math.min(src.height,q[1]))];draw()};
+$('cv').onpointerup=()=>{drag=-1};
+window.onresize=()=>{if(src)draw()};
+
+function homog(d,s){
+  const A=[];
+  for(let i=0;i<4;i++){const[x,y]=d[i],[u,v]=s[i];
+    A.push([x,y,1,0,0,0,-u*x,-u*y,u]);A.push([0,0,0,x,y,1,-v*x,-v*y,v]);}
+  for(let i=0;i<8;i++){
+    let m=i;for(let r=i+1;r<8;r++)if(Math.abs(A[r][i])>Math.abs(A[m][i]))m=r;
+    [A[i],A[m]]=[A[m],A[i]];
+    for(let r=0;r<8;r++)if(r!==i){const f=A[r][i]/A[i][i];for(let c=i;c<9;c++)A[r][c]-=f*A[i][c]}
+  }
+  return A.map((r,i)=>r[8]/r[i]);
+}
+function warp(W,H){
+  const h=homog([[0,0],[W,0],[W,H],[0,H]],pts);
+  const out=new ImageData(W,H),od=out.data;
+  const sw=src.width,sh=src.height,sd=src.getContext('2d').getImageData(0,0,sw,sh).data;
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    const z=h[6]*x+h[7]*y+1,u=(h[0]*x+h[1]*y+h[2])/z,v=(h[3]*x+h[4]*y+h[5])/z;
+    const x0=Math.floor(u),y0=Math.floor(v),i=(y*W+x)*4;
+    od[i+3]=255;
+    if(x0<0||y0<0||x0>=sw-1||y0>=sh-1){od[i]=od[i+1]=od[i+2]=255;continue}
+    const fx=u-x0,fy=v-y0,a=(y0*sw+x0)*4,b=a+4,c=a+sw*4,d=c+4;
+    for(let k=0;k<3;k++)od[i+k]=sd[a+k]*(1-fx)*(1-fy)+sd[b+k]*fx*(1-fy)+sd[c+k]*(1-fx)*fy+sd[d+k]*fx*fy;
+  }
+  return out;
+}
+function clean(img,mode){
+  const W=img.width,H=img.height,d=img.data,N=W*H,g=new Float32Array(N),hist=new Uint32Array(256);
+  for(let i=0;i<N;i++){const v=.299*d[i*4]+.587*d[i*4+1]+.114*d[i*4+2];g[i]=v;hist[v|0]++}
+  let acc=0,p90=255;for(let v=0;v<256;v++){acc+=hist[v];if(acc>=N*.9){p90=v;break}}
+  const w1=W+1,I=new Float64Array(w1*(H+1));
+  for(let y=1;y<=H;y++){let row=0;for(let x=1;x<=W;x++){row+=g[(y-1)*W+x-1];I[y*w1+x]=I[(y-1)*w1+x]+row}}
+  const r=Math.round(W/25);
+  for(let y=0;y<H;y++){
+    const y1=Math.max(0,y-r),y2=Math.min(H,y+r+1);
+    for(let x=0;x<W;x++){
+      const x1=Math.max(0,x-r),x2=Math.min(W,x+r+1);
+      let m=(I[y2*w1+x2]-I[y1*w1+x2]-I[y2*w1+x1]+I[y1*w1+x1])/((x2-x1)*(y2-y1));
+      m=Math.max(m,p90*.7,1);
+      const i=y*W+x,f=250/m,j=i*4;
+      if(mode==='bw'){const v=g[i]/m<.85?0:255;d[j]=d[j+1]=d[j+2]=v}
+      else if(mode==='gray'){d[j]=d[j+1]=d[j+2]=g[i]*f}
+      else{d[j]*=f;d[j+1]*=f;d[j+2]*=f}
+    }
+  }
+}
+$('go').onclick=async()=>{
+  const b=$('go');b.disabled=true;await new Promise(r=>setTimeout(r,40));
+  const img=warp(1240,1754),mode=$('mode').value;
+  if(mode!=='orig')clean(img,mode);
+  const o=document.createElement('canvas');o.width=1240;o.height=1754;o.getContext('2d').putImageData(img,0,0);
+  pages.push(o);renderPages();b.disabled=false;
+  $('out').scrollIntoView({behavior:'smooth'});
+};
+function renderPages(){
+  const box=$('pages');box.innerHTML='';$('out').hidden=!pages.length;
+  pages.forEach((p,i)=>{
+    const w=document.createElement('div');w.className='pg';
+    const t=document.createElement('canvas');t.width=192;t.height=272;t.getContext('2d').drawImage(p,0,0,192,272);
+    const x=document.createElement('button');x.textContent='×';x.setAttribute('aria-label','Delete');
+    x.onclick=()=>{pages.splice(i,1);renderPages()};
+    w.append(t,x);box.append(w);
+  });
+}
+function save(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000)}
+$('png').onclick=()=>pages.length&&pages[pages.length-1].toBlob(b=>save(b,'lipiscan.png'),'image/png');
+$('pdf').onclick=async()=>{
+  if(!pages.length)return;
+  const enc=new TextEncoder(),parts=[],offs=[];let len=0;
+  const add=x=>{const b=typeof x==='string'?enc.encode(x):x;parts.push(b);len+=b.length};
+  const obj=(id,s)=>{offs[id]=len;add(id+" 0 obj\n"+s+"\nendobj\n")};
+  const n=pages.length;
+  add("%PDF-1.4\n");
+  obj(1,"<</Type/Catalog/Pages 2 0 R>>");
+  obj(2,`<</Type/Pages/Kids[${pages.map((_,i)=>(3+i*3)+" 0 R").join(" ")}]/Count ${n}>>`);
+  for(let i=0;i<n;i++){
+    const p=3+i*3,c=pages[i];
+    const jpg=new Uint8Array(await(await new Promise(r=>c.toBlob(r,'image/jpeg',.93))).arrayBuffer());
+    obj(p,`<</Type/Page/Parent 2 0 R/MediaBox[0 0 595.28 841.89]/Resources<</XObject<</Im0 ${p+2} 0 R>>>>/Contents ${p+1} 0 R>>`);
+    const s="q 595.28 0 0 841.89 0 0 cm /Im0 Do Q";
+    obj(p+1,`<</Length ${s.length}>>\nstream\n${s}\nendstream`);
+    offs[p+2]=len;
+    add(`${p+2} 0 obj\n<</Type/XObject/Subtype/Image/Width ${c.width}/Height ${c.height}/ColorSpace/DeviceRGB/BitsPerComponent 8/Filter/DCTDecode/Length ${jpg.length}>>\nstream\n`);
+    add(jpg);add("\nendstream\nendobj\n");
+  }
+  const total=3+n*3,xo=len;
+  let x=`xref\n0 ${total}\n0000000000 65535 f \n`;
+  for(let i=1;i<total;i++)x+=String(offs[i]).padStart(10,"0")+" 00000 n \n";
+  add(x+`trailer\n<</Size ${total}/Root 1 0 R>>\nstartxref\n${xo}\n%%EOF`);
+  save(new Blob(parts,{type:"application/pdf"}),'lipiscan.pdf');
+};
+</script>
+</body>
+</html>
