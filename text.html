@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LipiScan Text</title>
+<style>
+:root{--bg:#eef2f7;--card:#fff;--ink:#0b2545;--ac:#0f8b8d;--mut:#5b6b82;--line:#d3dce8}
+@media(prefers-color-scheme:dark){:root{--bg:#0a1424;--card:#13213a;--ink:#e6edf7;--ac:#35c4c6;--mut:#93a4bd;--line:#26385a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 system-ui,"Noto Sans Bengali","Noto Naskh Arabic",sans-serif}
+header,main{max-width:640px;margin:auto;padding:14px}
+header{display:flex;justify-content:space-between;align-items:center;padding-bottom:0}
+h1{font-size:20px;margin:0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin:12px 0}
+button,label.btn{font:inherit;background:var(--ac);color:#fff;border:0;border-radius:10px;padding:12px 16px;margin:4px 6px 4px 0;display:inline-block;cursor:pointer}
+button.s{background:transparent;color:var(--ac);border:1.5px solid var(--ac)}
+button:disabled{opacity:.5}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
+input,select,textarea{font:inherit;width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);margin:4px 0 10px}
+textarea{min-height:260px;line-height:1.7}
+.hint{color:var(--mut);font-size:14px;margin:0 0 8px}
+img{max-width:100%;border-radius:8px;display:block;margin-top:8px}
+a{color:var(--ac)}
+[hidden]{display:none!important}
+#print{display:none}
+@media print{body>*{display:none!important}#print{display:block!important;white-space:pre-wrap;font-size:14pt;color:#000;background:#fff}}
+</style>
+</head>
+<body>
+<header>
+  <h1 data-i="title"></h1>
+  <select id="lang" aria-label="Language" style="width:auto"><option value="bn">বাংলা</option><option value="en">English</option></select>
+</header>
+<main>
+  <p class="hint"><a href="index.html" data-i="back"></a></p>
+
+  <div class="card">
+    <label for="eng" data-i="engine"></label>
+    <select id="eng">
+      <option value="ai" data-i="e_ai"></option>
+      <option value="tess" data-i="e_tess"></option>
+    </select>
+    <div id="aibox">
+      <label for="key" data-i="key"></label>
+      <input id="key" type="password" autocomplete="off" placeholder="AIza...">
+      <label for="model" data-i="model"></label>
+      <input id="model" value="gemini-3.8-flash">
+      <p class="hint" data-i="keyhelp"></p>
+    </div>
+    <label class="btn"><span data-i="pick"></span><input id="file" type="file" accept="image/*" hidden></label>
+    <img id="prev" alt="" hidden>
+    <button id="go" data-i="go" disabled></button>
+    <p class="hint" id="st" role="status"></p>
+  </div>
+
+  <div class="card" id="res" hidden>
+    <textarea id="txt" dir="auto" aria-label="Result"></textarea>
+    <button id="copy" data-i="copy"></button>
+    <button id="dl" class="s" data-i="dl"></button>
+    <button id="pr" class="s" data-i="pr"></button>
+    <p class="hint" data-i="check"></p>
+  </div>
+</main>
+<div id="print" dir="auto"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script>
+const S={
+ bn:{title:"হাতের লেখা থেকে টাইপ করা লেখা",back:"← স্ক্যান পেজে ফিরুন",engine:"পদ্ধতি",e_ai:"AI (হাতের লেখায় ভালো, নিজের ফ্রি কী লাগবে)",e_tess:"অফলাইন (কী লাগে না, মূলত ছাপা লেখার জন্য)",key:"Gemini API কী",model:"মডেলের নাম",keyhelp:"aistudio.google.com এ গিয়ে ফ্রি কী নিন। কী শুধু আপনার ফোনের ব্রাউজারে থাকে। সতর্কতা: ফ্রি টিয়ারে ছবি Google এ যায় এবং তারা তা উন্নয়নে ব্যবহার করতে পারে, তাই গোপন নথি দেবেন না।",pick:"ছবি বাছাই করুন",go:"লেখা বের করুন",copy:"কপি",dl:"TXT ডাউনলোড",pr:"প্রিন্ট / PDF",check:"ফলাফল পড়ে ভুল থাকলে ঠিক করে নিন। হাতের লেখায় ভুল হতে পারে।",wait:"কাজ চলছে, একটু অপেক্ষা করুন…",done:"হয়ে গেছে।",nokey:"আগে API কী দিন।",err:"সমস্যা হয়েছে: ",copied:"কপি হয়েছে।"},
+ en:{title:"Handwriting to typed text",back:"← Back to scanner",engine:"Method",e_ai:"AI (best for handwriting, needs your own free key)",e_tess:"Offline (no key, mainly for printed text)",key:"Gemini API key",model:"Model name",keyhelp:"Get a free key at aistudio.google.com. The key stays in this browser only. Note: on the free tier your image goes to Google and may be used to improve its products, so avoid confidential documents.",pick:"Choose a photo",go:"Extract text",copy:"Copy",dl:"Download TXT",pr:"Print / PDF",check:"Read the result and fix any mistakes. Handwriting recognition can be wrong.",wait:"Working, please wait…",done:"Done.",nokey:"Enter your API key first.",err:"Error: ",copied:"Copied."}
+};
+const $=id=>document.getElementById(id);let L='bn';
+function setL(l){L=l;document.documentElement.lang=l;document.querySelectorAll('[data-i]').forEach(e=>e.textContent=S[l][e.dataset.i]);document.title=S[l].title}
+$('lang').onchange=e=>setL(e.target.value);setL('bn');
+try{$('key').value=localStorage.getItem('lk')||'';$('model').value=localStorage.getItem('lm')||'gemini-3.8-flash'}catch(e){}
+$('eng').onchange=()=>$('aibox').hidden=$('eng').value!=='ai';
+
+let cv=null;
+$('file').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;
+  const bm=await createImageBitmap(f,{imageOrientation:'from-image'});
+  const k=Math.min(1,2000/Math.max(bm.width,bm.height));
+  cv=document.createElement('canvas');cv.width=Math.round(bm.width*k);cv.height=Math.round(bm.height*k);
+  cv.getContext('2d').drawImage(bm,0,0,cv.width,cv.height);
+  $('prev').src=cv.toDataURL('image/jpeg',.7);$('prev').hidden=false;$('go').disabled=false;e.target.value='';
+};
+const st=m=>$('st').textContent=m;
+$('go').onclick=async()=>{
+  const b=$('go');b.disabled=true;st(S[L].wait);
+  try{
+    let text='';
+    if($('eng').value==='ai'){
+      const key=$('key').value.trim(),model=$('model').value.trim();
+      if(!key){st(S[L].nokey);b.disabled=false;return}
+      try{localStorage.setItem('lk',key);localStorage.setItem('lm',model)}catch(e){}
+      const data=cv.toDataURL('image/jpeg',.9).split(',')[1];
+      const prompt="Transcribe all the text in this image exactly as written. Keep the original languages (Bengali, English, Arabic or others) and scripts; do not translate or correct. Keep line breaks. Write tables as plain text rows with | between cells. Mark unreadable words as [?]. Output only the transcription.";
+      const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{
+        method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':key},
+        body:JSON.stringify({contents:[{parts:[{text:prompt},{inline_data:{mime_type:'image/jpeg',data}}]}]})});
+      const j=await r.json();
+      if(!r.ok)throw new Error(j.error&&j.error.message||r.status);
+      text=((j.candidates||[])[0]?.content?.parts||[]).map(p=>p.text||'').join('');
+    }else{
+      const r=await Tesseract.recognize(cv,'ben+eng+ara',{logger:m=>{if(m.status)st(m.status+' '+Math.round((m.progress||0)*100)+'%')}});
+      text=r.data.text;
+    }
+    $('txt').value=text.trim();$('res').hidden=false;st(S[L].done);
+    $('res').scrollIntoView({behavior:'smooth'});
+  }catch(err){st(S[L].err+err.message)}
+  b.disabled=false;
+};
+$('copy').onclick=async()=>{try{await navigator.clipboard.writeText($('txt').value);st(S[L].copied)}catch(e){$('txt').select()}};
+$('dl').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([$('txt').value],{type:'text/plain;charset=utf-8'}));a.download='lipiscan.txt';a.click()};
+$('pr').onclick=()=>{$('print').textContent=$('txt').value;window.print()};
+</script>
+</body>
+</html>
